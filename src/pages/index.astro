@@ -1,16 +1,179 @@
 ---
----
+import Base from "../layouts/Base.astro";
+import chatgptMark from "../assets/openai/OAI_OpenAI-Blossom_Black.svg?url";
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+const builtInAIAccounts = [
+    { name: "ChatGPT", mark: chatgptMark, markSize: "190%", url: "https://chatgpt.com?temporary-chat=false", display: "chatgpt.com", customSettings: [{ name: "tempChat", read: "boolean" }] },
+    { name: "Gemini", mark: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/google-gemini.svg", url: "https://gemini.google.com/u/1", display: "gemini.google.com/u/1", customSettings: [{ name: "userId", read: "string" }] },
+    { name: "Claude", mark: "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/claude-ai.svg", url: "https://claude.ai", display: "claude.ai", customSettings: [] },
+];
+---
+<Base title="你想用哪個 AI 聊天?">
+    <main class="page">
+        <header class="page-head">
+            <h1 class="page-title">你想用哪個 AI 聊天？</h1>
+            <button id="settings-button" type="button" class="text-button">設定</button>
+        </header>
+        <ul id="profiles" class="rows">
+            <li id="no-rows" class="empty" hidden>首頁上沒有任何 AI。到「設定」開啟預設 AI，或新增自己的檔案。</li>
+            {builtInAIAccounts.map((account, index) => (
+                <li>
+                    <a class="row" href={account.url} data-builtin={account.name}>
+                        <kbd class="row-key">{index + 1}</kbd>
+                        <span class="row-name">{account.name}</span>
+                        <span class="row-url">{account.display}</span>
+                        <span class="row-mark" style={`--mark:url("${account.mark}");--mark-size:${account.markSize ?? "contain"}`} aria-hidden="true"></span>
+                    </a>
+                </li>
+            ))}
+        </ul>
+        <script is:inline>
+            // Hide switched-off defaults before first paint.
+            try { for (const name of JSON.parse(localStorage.getItem("whichai-disabled-defaults") ?? "[]")) document.querySelector(`[data-builtin="${name}"]`)?.parentElement?.setAttribute("hidden", ""); } catch {}
+        </script>
+        <p class="page-foot">按數字鍵直接開啟。</p>
+    </main>
+    <dialog id="settings-dialog" class="sheet" aria-labelledby="settings-title">
+        <div class="sheet-head">
+            <h2 id="settings-title">設定</h2>
+            <button id="close-settings" type="button" class="text-button">關閉</button>
+        </div>
+
+        <section>
+            <h3>預設 AI</h3>
+            <p class="hint">關掉的項目不會出現在首頁。Gemini 的帳號編號是網址裡 <code>/u/</code> 後面的數字。</p>
+            <ul class="defaults">
+                {builtInAIAccounts.map((account) => (
+                    <li>
+                        <label class="check check-main"><input class="switch" type="checkbox" data-default={account.name} checked />{account.name}</label>
+                        {account.name === "ChatGPT" && <label class="check check-sub">用臨時對話開啟<input id="chatgpt-temp-chat" class="switch" type="checkbox" /></label>}
+                        {account.name === "Gemini" && <label class="check check-sub">帳號編號<input id="gemini-user-id" type="number" min="0" step="1" value="1" inputmode="numeric" /></label>}
+                    </li>
+                ))}
+            </ul>
+        </section>
+
+        <section>
+            <h3>你的檔案</h3>
+            <ul id="profile-list" class="saved"></ul>
+            <form id="profile-form">
+                <div class="fields fields-2">
+                    <label class="field">名稱<input id="profile-name" required placeholder="Perplexity" /></label>
+                    <label class="field">網址<input id="profile-url" required type="url" placeholder="https://www.perplexity.ai" /></label>
+                </div>
+                <details>
+                    <summary>網址變數（選填）</summary>
+                    <p class="hint">網址裡的 <code>[:名稱]</code> 會換成這裡的值，例如 <code>https://example.com/u/[:userId]</code>。</p>
+                    <div class="fields fields-3">
+                        <label class="field">變數名稱<input id="setting-name" placeholder="userId" /></label>
+                        <label class="field">類型<select id="setting-type"><option value="string">文字</option><option value="boolean">布林值</option></select></label>
+                        <label class="field">值<input id="setting-value" placeholder="2" /></label>
+                    </div>
+                </details>
+                <div class="actions"><button class="button" type="submit">新增檔案</button></div>
+            </form>
+        </section>
+
+        <section>
+            <h3>分享</h3>
+            <p class="hint">把目前的檔案和預設 AI 的設定存成一個網址。在別的瀏覽器打開，就會套用同一組檔案和設定。</p>
+            <div class="actions">
+                <button id="save-profiles" type="button" class="button button-solid">儲存並建立分享網址</button>
+            </div>
+            <p id="share-result" class="share-result hint" aria-live="polite"></p>
+        </section>
+    </dialog>
+    <script>
+        import { convexCall } from "../lib/convex";
+        import { bindDigitKeys, createRow, displayUrl, numberRows, resolveUrl, type Profile } from "../lib/rows";
+
+        const key = "whichai-profiles";
+        const dialog = document.querySelector<HTMLDialogElement>("#settings-dialog");
+        const list = document.querySelector<HTMLUListElement>("#profile-list");
+        const profilesEl = document.querySelector<HTMLUListElement>("#profiles");
+        const geminiInput = document.querySelector<HTMLInputElement>("#gemini-user-id");
+        const readProfiles = (): Profile[] => JSON.parse(localStorage.getItem(key) ?? "[]") as Profile[];
+        const geminiUserId = () => localStorage.getItem("gemini-userId") || "1";
+        const disabledKey = "whichai-disabled-defaults";
+        const tempChatInput = document.querySelector<HTMLInputElement>("#chatgpt-temp-chat");
+        const defaultToggles = document.querySelectorAll<HTMLInputElement>("[data-default]");
+        const readDisabled = (): string[] => JSON.parse(localStorage.getItem(disabledKey) ?? "[]") as string[];
+        const tempChat = () => localStorage.getItem("chatgpt-tempChat") === "true";
+
+        const renderSaved = (profiles: Profile[]) => {
+            if (!list) return;
+            list.replaceChildren(...profiles.map((profile) => {
+                const item = document.createElement("li");
+                const text = document.createElement("span");
+                const name = document.createElement("span");
+                const url = document.createElement("span");
+                const remove = document.createElement("button");
+                name.className = "saved-name";
+                name.textContent = profile.name;
+                url.className = "saved-url";
+                url.textContent = displayUrl(resolveUrl(profile));
+                text.append(name, url);
+                remove.type = "button";
+                remove.dataset.delete = profile.id;
+                remove.textContent = "刪除";
+                remove.setAttribute("aria-label", `刪除 ${profile.name}`);
+                item.append(text, remove);
+                return item;
+            }));
+            if (!profiles.length) {
+                const empty = document.createElement("li");
+                empty.className = "hint";
+                empty.textContent = "還沒有檔案。在下面新增常用的 AI 聊天網址。";
+                list.append(empty);
+            }
+        };
+
+        const render = () => {
+            const geminiLink = document.querySelector<HTMLAnchorElement>('[data-builtin="Gemini"]');
+            if (geminiLink) {
+                geminiLink.href = `https://gemini.google.com/u/${geminiUserId()}`;
+                const url = geminiLink.querySelector(".row-url");
+                if (url) url.textContent = displayUrl(geminiLink.href);
+            }
+            const chatgptLink = document.querySelector<HTMLAnchorElement>('[data-builtin="ChatGPT"]');
+            if (chatgptLink) {
+                chatgptLink.href = `https://chatgpt.com?temporary-chat=${tempChat()}`;
+                const url = chatgptLink.querySelector(".row-url");
+                if (url) url.textContent = tempChat() ? "chatgpt.com?temporary-chat=true" : "chatgpt.com";
+            }
+            const disabled = readDisabled();
+            document.querySelectorAll<HTMLAnchorElement>("[data-builtin]").forEach((row) => { if (row.parentElement) row.parentElement.hidden = disabled.includes(row.dataset.builtin ?? ""); });
+            const profiles = readProfiles();
+            renderSaved(profiles);
+            if (!profilesEl) return;
+            profilesEl.querySelectorAll("[data-custom]").forEach((row) => row.remove());
+            profilesEl.append(...profiles.map(createRow));
+            numberRows(profilesEl);
+            const noRows = document.querySelector<HTMLLIElement>("#no-rows");
+            if (noRows) noRows.hidden = Boolean(profilesEl.querySelector("li:not([hidden]) > .row"));
+            document.querySelector(".page-foot")?.toggleAttribute("hidden", noRows?.hidden === false);
+        };
+
+        render();
+        if (profilesEl) bindDigitKeys(profilesEl);
+        document.querySelector("#settings-button")?.addEventListener("click", () => { if (geminiInput) geminiInput.value = geminiUserId(); if (tempChatInput) tempChatInput.checked = tempChat(); const disabled = readDisabled(); defaultToggles.forEach((toggle) => { toggle.checked = !disabled.includes(toggle.dataset.default ?? ""); }); render(); dialog?.showModal(); });
+        tempChatInput?.addEventListener("change", () => { localStorage.setItem("chatgpt-tempChat", String(tempChatInput.checked)); render(); });
+        defaultToggles.forEach((toggle) => toggle.addEventListener("change", () => { localStorage.setItem(disabledKey, JSON.stringify([...defaultToggles].filter((t) => !t.checked).map((t) => t.dataset.default))); render(); }));
+        document.querySelector("#close-settings")?.addEventListener("click", () => dialog?.close());
+        geminiInput?.addEventListener("input", () => { const value = geminiInput.value.trim(); if (value) { localStorage.setItem("gemini-userId", value); render(); } });
+        list?.addEventListener("click", (e) => { const id = (e.target as HTMLElement).dataset.delete; if (id) { localStorage.setItem(key, JSON.stringify(readProfiles().filter((p) => p.id !== id))); render(); } });
+        document.querySelector<HTMLFormElement>("#profile-form")?.addEventListener("submit", (e) => { e.preventDefault(); const name = (document.querySelector<HTMLInputElement>("#profile-name")?.value ?? "").trim(); const url = (document.querySelector<HTMLInputElement>("#profile-url")?.value ?? "").trim(); const settingName = (document.querySelector<HTMLInputElement>("#setting-name")?.value ?? "").trim(); const settingValue = (document.querySelector<HTMLInputElement>("#setting-value")?.value ?? "").trim(); const settingType = (document.querySelector<HTMLSelectElement>("#setting-type")?.value ?? "string") as "string" | "boolean"; if (!name || !url) return; const customSettings = settingName ? [{ name: settingName, read: settingType, value: settingValue }] : []; localStorage.setItem(key, JSON.stringify([...readProfiles(), { id: crypto.randomUUID(), name, url, customSettings }])); (e.target as HTMLFormElement).reset(); render(); });
+        document.querySelector("#save-profiles")?.addEventListener("click", () => {
+            const slug = crypto.randomUUID();
+            const shared = { profiles: readProfiles(), geminiUserId: geminiUserId(), tempChat: tempChat(), disabledDefaults: readDisabled() };
+            localStorage.setItem(`whichai-share-${slug}`, JSON.stringify(shared));
+            void convexCall("mutation", "profiles:create", { slug, ...shared });
+            const result = document.querySelector("#share-result");
+            if (!result) return;
+            const link = document.createElement("a");
+            link.href = `${location.origin}/s/${slug}`;
+            link.textContent = link.href;
+            result.replaceChildren("已建立分享網址：", link);
+        });
+    </script>
+</Base>
