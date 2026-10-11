@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { shareEnabled } from "../lib/convex";
 import chatgptMark from "../assets/openai/OAI_OpenAI-Blossom_Black.svg?url";
 
 const builtInAIAccounts = [
@@ -74,6 +75,7 @@ const builtInAIAccounts = [
             </form>
         </section>
 
+        {shareEnabled && (
         <section>
             <h3>分享</h3>
             <p class="hint">把目前的檔案和預設 AI 的設定存成一個網址。在別的瀏覽器打開，就會套用同一組檔案和設定。</p>
@@ -82,6 +84,7 @@ const builtInAIAccounts = [
             </div>
             <p id="share-result" class="share-result hint" aria-live="polite"></p>
         </section>
+        )}
     </dialog>
     <script>
         import { convexCall } from "../lib/convex";

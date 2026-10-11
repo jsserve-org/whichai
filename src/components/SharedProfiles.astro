@@ -10,12 +10,12 @@ import Base from "../layouts/Base.astro";
         <p id="shared-status" class="empty" hidden></p>
     </main>
     <script>
-        import { convexCall } from "../lib/convex";
+        import { convexCall, shareEnabled } from "../lib/convex";
         import type { Profile } from "../lib/rows";
 
         // Share links look like /s/<id>; ?id=<id> is still accepted.
         const slug = location.pathname.match(/^\/s\/([^/]+)\/?$/)?.[1] ?? new URLSearchParams(location.search).get("id");
-        const local = slug ? JSON.parse(localStorage.getItem(`whichai-share-${slug}`) ?? "null") : null;
+        const local = slug && shareEnabled ? JSON.parse(localStorage.getItem(`whichai-share-${slug}`) ?? "null") : null;
         // A link opened in another browser isn't in localStorage, so fall back to Convex.
         const stored = local ?? (slug ? (await convexCall("query", "profiles:get", { slug }).catch(() => null))?.value ?? null : null);
 
@@ -30,7 +30,7 @@ import Base from "../layouts/Base.astro";
             location.replace("/");
         } else {
             const status = document.querySelector<HTMLParagraphElement>("#shared-status");
-            if (status) { status.textContent = slug ? "找不到這個分享檔案。" : "找不到這個頁面。"; status.hidden = false; }
+            if (status) { status.textContent = slug && !shareEnabled ? "分享功能已關閉。" : slug ? "找不到這個分享檔案。" : "找不到這個頁面。"; status.hidden = false; }
             if (!slug) { const title = document.querySelector(".page-title"); if (title) title.textContent = "找不到頁面"; }
         }
     </script>
